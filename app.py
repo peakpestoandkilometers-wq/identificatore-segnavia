@@ -1,9 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
-import requests
 import os
-import gc  # Libreria per pulire la memoria (Garbage Collection)
 
 # Configurazione API Gemini
 if "GEMINI_API_KEY" in st.secrets:
@@ -13,75 +11,46 @@ else:
 
 st.set_page_config(page_title="Identificatore Segnavia", layout="centered")
 
-st.title("📸 Riconoscimento Segnavia CAI Integrato")
-st.write("L'AI analizza l'immagine e interroga il database per verificare la corrispondenza.")
-
-# Riduciamo le dimensioni dell'immagine prima di elaborarla (risparmio RAM)
-def resize_image(image, max_dimension=1024):
-    image.thumbnail((max_dimension, max_dimension))
-    return image
+st.title("📸 Riconoscimento Segnavia CAI")
+st.write("Carica una foto del segnavia e indica la tua posizione per un'analisi mirata.")
 
 uploaded_file = st.file_uploader("Scegli un'immagine...", type=["jpg", "png", "jpeg"])
 
-def cerca_su_osm(codice_sentiero):
-    """Interroga l'API di OpenStreetMap per trovare il nome del sentiero."""
-    overpass_url = "http://overpass-api.de/api/interpreter"
-    overpass_query = f"""
-    [out:json];
-    relation["ref"="{codice_sentiero}"]["route"="hiking"];
-    out center;
-    """
-    try:
-        response = requests.get(overpass_url, params={'data': overpass_query}, timeout=3)
-        data = response.json()
-        if 'elements' in data and len(data['elements']) > 0:
-            rel = data['elements'][0]
-            return rel.get('tags', {}).get('name', 'Nome non disponibile')
-    except:
-        pass
-    return None
+# Inseriamo un campo di testo per far inserire all'utente la posizione/regione
+posizione_utente = st.text_input("In quale zona o regione ti trovi? (es. 'Dolomiti, Veneto' o 'Appennino Tosco-Emiliano')", "")
 
 if uploaded_file is not None:
     image_file = Image.open(uploaded_file)
-    # Mostriamo una versione ridotta dell'immagine
     st.image(image_file, caption="Segnavia caricato", use_column_width=True)
     
-    if st.button("Analizza e Verifica"):
-        with st.spinner("Analisi in corso..."):
-            try:
-                # Processa l'immagine e riducila per consumare meno memoria
-                img_processed = resize_image(image_file)
-                
-                # Interrogazione di Gemini
-                model = genai.GenerativeModel(model_name='gemini-2.5-flash')
-                response = model.generate_content([
+    if st.button("Analizza Segnavia"):
+        if not posizione_utente:
+            st.warning("Per favore, inserisci la tua posizione per restringere il campo.")
+        else:
+            with st.spinner("Analisi del segnavia in corso..."):
+                try:
+                    model = genai.GenerativeModel(model_name='gemini-2.5-flash')
+                    
+                    # Prompt arricchito con la posizione
+                    prompt = f"""
+                    Sei un assistente esperto di escursionismo e cartografia CAI.
+                    Analizza l'immagine e la posizione indicata dall'utente: {posizione_utente}.
+                    
+                    Rispondi seguendo questo schema chiaro e discorsivo:
+                    
+                    - 🎯 Tipologia segnavia:
+                    - ℹ️ Significato locale (riferito a {posizione_utente}):
+                    - 🔢 Codice sentiero stimato:
+                    - 🛡️ Consigli di sicurezza per questa zona:
                     """
-                    Sei un assistente esperto di escursionismo. 
-                    Analizza l'immagine e individua il codice del sentiero CAI (es. 501, 12A, 1).
-                    Rispondi solo con il codice (es. "501"). Se non trovi un codice o non è chiaro, scrivi "Non trovato".
-                    """,
-                    img_processed
-                ])
-                
-                codice_trovato = response.text.strip()
-                st.info(f"Codice identificato da Gemini: **{codice_trovato}**")
-                
-                if codice_trovato != "Non trovato":
-                    st.write("Verifica del sentiero su OpenStreetMap...")
-                    nome_osm = cerca_su_osm(codice_trovato)
                     
-                    if nome_osm:
-                        st.success(f"✅ Trovato su OSM: **{nome_osm}**")
-                        st.write(f"👉 [Visualizza su Waymarked Trails](https://hiking.waymarkedtrails.org/#route?ref={codice_trovato})")
-                    else:
-                        st.warning("Il codice non è presente su OpenStreetMap, ma l'AI ha riconosciuto il segnavia nell'immagine.")
-                else:
-                    st.warning("Gemini non ha trovato un codice numerico chiaro nell'immagine.")
+                    response = model.generate_content([
+                        prompt,
+                        image_file
+                    ])
                     
-                # Pulizia della memoria forzata
-                del img_processed
-                del image_file
-                gc.collect()
+                    st.success("Analisi completata!")
+                    st.write(response.text)
                     
-            except Exception as e:
-                st.error(f"Errore: {e}")
+                except Exception as e:
+                    st.error(f"Si è verificato un errore: {e}")
