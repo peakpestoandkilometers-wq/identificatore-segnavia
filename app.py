@@ -1,8 +1,8 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
-import requests
 import os
+import json
 
 # Configurazione delle API di Google
 if "GEMINI_API_KEY" in st.secrets:
@@ -13,40 +13,43 @@ else:
 st.set_page_config(page_title="Riconoscimento Segnavia", layout="centered")
 
 st.title("📸 Identificatore Segnavia e OSM")
-st.write("Inserisci la tua posizione e carica l'immagine del segnavia per cercarlo su OpenStreetMap.")
+st.write("Carica l'immagine del segnavia e l'app la confronterà con il database locale dei sentieri.")
 
 uploaded_file = st.file_uploader("Scegli un'immagine...", type=["jpg", "png", "jpeg"])
-posizione_utente = st.text_input("In che regione/zona ti trovi? (es. 'Liguria', 'Val Seriana')")
+posizione_utente = st.text_input("In che regione/zona ti trovi? (es. 'Liguria')", value="Liguria")
 
-def cerca_su_osm_localizzato(simbolo_letto, localita):
-    """Interroga il database OSM limitando la ricerca all'area definita dall'utente."""
-    overpass_url = "http://overpass-api.de/api/interpreter"
-    
-    # Query che interroga gli elementi escursionistici
-    overpass_query = f"""
-    [out:json];
-    relation["route"="hiking"];
-    out center;
-    """
+# Funzione per caricare i dati dal file JSON locale
+@st.cache_data
+def carica_database():
     try:
-        response = requests.get(overpass_url, params={'data': overpass_query}, timeout=6)
-        data = response.json()
+        with open('sentieri.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        st.error("Il file 'sentieri.json' non è stato trovato nella cartella. Assicurati di caricarlo insieme ad app.py.")
+        return None
+
+# Carica i dati all'avvio
+dati_sentieri = carica_database()
+
+def cerca_su_json_locale(simbolo_letto, localita, dati_json):
+    """Cerca la corrispondenza del segnavia all'interno del file JSON locale."""
+    if not dati_json or 'features' not in dati_json:
+        return None
+
+    simbolo_letto = simbolo_letto.lower()
+    
+    for feature in dati_json['features']:
+        properties = feature.get('properties', {})
+        osmc_symbol = properties.get('osmc:symbol', '').lower()
+        nome = properties.get('name', '').lower()
         
-        if 'elements' in data:
-            for element in data['elements']:
-                tags = element.get('tags', {})
-                osmc_symbol = tags.get('osmc:symbol', '').lower()
-                name = tags.get('name', '').lower()
-                
-                # Confronta il simbolo letto e la località
-                if simbolo_letto.lower() in osmc_symbol or name:
-                    return {
-                        "nome": tags.get('name', 'Sentiero senza nome'),
-                        "id": element['id'],
-                        "simbolo": tags.get('osmc:symbol', 'N/D')
-                    }
-    except:
-        pass
+        # Confronta il simbolo letto con quello nel file
+        if simbolo_letto in osmc_symbol or simbolo_letto in nome:
+            return {
+                "nome": properties.get('name', 'Sentiero senza nome'),
+                "ref": properties.get('ref', 'N/D'),
+                "simbolo": properties.get('osmc:symbol', 'N/D')
+            }
     return None
 
 if uploaded_file is not None:
@@ -59,12 +62,13 @@ if uploaded_file is not None:
         else:
             with st.spinner("Analisi in corso..."):
                 try:
+                    # Chiamata all'AI per leggere il simbolo
                     model = genai.GenerativeModel(model_name='gemini-2.5-flash')
                     response = model.generate_content([
                         f"""
                         Sei un esperto di escursionismo CAI.
-                        Osserva il segnavia nell'immagine e indica la forma e il colore (es. circle, red_bar).
-                        Restituisci solo la parola chiave del simbolo, es: "circle" o "bar".
+                        Osserva il segnavia nell'immagine e indica il simbolo o i colori (es. red:white:red).
+                        Restituisci solo la parola chiave del simbolo trovata (es. 'red:white:red', 'circle', 'bar').
                         """,
                         image_file
                     ])
@@ -72,15 +76,15 @@ if uploaded_file is not None:
                     simbolo_letto = response.text.strip()
                     st.info(f"Simbolo identificato dall'AI: **{simbolo_letto}**")
                     
-                    st.write(f"Ricerca nel catasto per l'area: **{posizione_utente}**...")
-                    risultato = cerca_su_osm_localizzato(simbolo_letto, posizione_utente)
+                    st.write(f"Ricerca nel catasto locale per l'area: **{posizione_utente}**...")
+                    risultato = cerca_su_json_locale(simbolo_letto, posizione_utente, dati_sentieri)
                     
                     if risultato:
-                        st.success(f"✅ Trovato su OSM: **{risultato['nome']}**")
-                        st.write(f"**Codice OSMC:** {risultato['simbolo']}")
-                        st.write(f"👉 [Apri su Waymarked Trails](https://hiking.waymarkedtrails.org/#route?id={risultato['id']})")
+                        st.success(f"✅ Trovato sul database locale: **{risultato['nome']}**")
+                        st.write(f"**Codice OSMC (Segnavia):** {risultato['simbolo']}")
+                        st.write(f"**Codice Sentiero:** {risultato['ref']}")
                     else:
-                        st.warning("Nessuna corrispondenza esatta trovata negli itinerari archiviati.")
+                        st.warning("Nessuna corrispondenza esatta trovata negli itinerari archiviati nel file JSON.")
                         
                 except Exception as e:
                     st.error(f"Errore durante l'esecuzione: {e}")
