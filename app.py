@@ -28,7 +28,7 @@ if uploaded_file is not None:
     image_file = Image.open(uploaded_file)
     st.image(image_file, caption="Segnavia caricato", use_column_width=True)
     
-    # Inizializza la chiave dell'AI
+    # Configura l'API Key
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     else:
