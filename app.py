@@ -3,6 +3,7 @@ import google.generativeai as genai
 from PIL import Image
 import os
 import json
+import time
 
 # Configurazione delle API di Google
 if "GEMINI_API_KEY" in st.secrets:
@@ -22,7 +23,6 @@ posizione_utente = st.text_input("In che regione/zona ti trovi? (es. 'Liguria')"
 @st.cache_data
 def carica_database():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    # Nota: il file è sentieri.geojson
     json_path = os.path.join(base_dir, 'sentieri.geojson')
     
     try:
@@ -59,12 +59,19 @@ if uploaded_file is not None:
     image_file = Image.open(uploaded_file)
     st.image(image_file, caption="Segnavia caricato", use_column_width=True)
     
-    if st.button("Analizza e confronta"):
-        if not posizione_utente:
-            st.warning("Inserisci la tua posizione per procedere con l'analisi mirata.")
+    # Alternativa manuale se non vuoi consumare le chiamate all'AI
+    st.write("---")
+    simbolo_manuale = st.text_input("Se hai raggiunto il limite giornaliero dell'AI, inserisci il simbolo manualmente (es. red:white:red):")
+    
+    if st.button("Analizza e confronta") or simbolo_manuale:
+        simbolo_letto = ""
+        
+        if simbolo_manuale:
+            simbolo_letto = simbolo_manuale
         else:
             with st.spinner("Analisi in corso..."):
                 try:
+                    # Chiamata all'AI
                     model = genai.GenerativeModel(model_name='gemini-2.5-flash')
                     response = model.generate_content([
                         f"""
@@ -74,19 +81,18 @@ if uploaded_file is not None:
                         """,
                         image_file
                     ])
-                    
                     simbolo_letto = response.text.strip()
-                    st.info(f"Simbolo identificato dall'AI: **{simbolo_letto}**")
-                    
-                    st.write(f"Ricerca nel catasto locale per l'area: **{posizione_utente}**...")
-                    risultato = cerca_su_json_locale(simbolo_letto, posizione_utente, dati_sentieri)
-                    
-                    if risultato:
-                        st.success(f"✅ Trovato sul database locale: **{risultato['nome']}**")
-                        st.write(f"**Codice OSMC (Segnavia):** {risultato['simbolo']}")
-                        st.write(f"**Codice Sentiero:** {risultato['ref']}")
-                    else:
-                        st.warning("Nessuna corrispondenza esatta trovata negli itinerari archiviati nel file GeoJSON.")
-                        
                 except Exception as e:
-                    st.error(f"Errore durante l'esecuzione: {e}")
+                    st.error("Limite giornaliero raggiunto o errore di connessione. Inserisci il segnavia manualmente qui sopra.")
+                    st.info("Puoi inserire manualmente il testo del segnavia per continuare il test.")
+        
+        if simbolo_letto:
+            st.info(f"Simbolo identificato: **{simbolo_letto}**")
+            risultato = cerca_su_json_locale(simbolo_letto, posizione_utente, dati_sentieri)
+            
+            if risultato:
+                st.success(f"✅ Trovato sul database locale: **{risultato['nome']}**")
+                st.write(f"**Codice OSMC (Segnavia):** {risultato['simbolo']}")
+                st.write(f"**Codice Sentiero:** {risultato['ref']}")
+            else:
+                st.warning("Nessuna corrispondenza esatta trovata negli itinerari archiviati nel file GeoJSON.")
