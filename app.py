@@ -37,7 +37,8 @@ if uploaded_file is not None:
     if st.button("Analizza con l'AI"):
         with st.spinner("Analisi visiva in corso..."):
             try:
-                model = genai.GenerativeModel(model_name='gemini-2.5-flash')
+                # Modello aggiornato a 1.5 Flash
+                model = genai.GenerativeModel(model_name='gemini-1.5-flash')
                 response = model.generate_content([
                     "Osserva l'immagine e restituisci solo la descrizione del simbolo (es. triangolo rosso, cerchio bianco, rombo rosso).",
                     image_file
@@ -72,7 +73,7 @@ if uploaded_file is not None:
                         st.warning("Nessun sentiero trovato per questo segnavia nel file.")
                         
             except Exception as e:
-                st.error("Hai raggiunto il limite giornaliero (20/20) dell'API. Inserisci il codice manualmente per proseguire il test:")
+                st.error("Hai raggiunto il limite giornaliero dell'API. Inserisci il codice manualmente per proseguire il test:")
                 testo_manuale = st.text_input("Inserisci il codice OSMC (es. red:white:red):")
                 if st.button("Cerca manualmente"):
                     chiave_man = testo_manuale.lower().strip()
