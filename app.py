@@ -1,48 +1,78 @@
-def cerca_su_json_locale(simbolo_letto, localita, dati_json):
-    """Cerca la corrispondenza del segnavia tenendo conto di sinonimi e codici."""
-    if not dati_json or 'features' not in dati_json:
+import streamlit as st
+from PIL import Image
+import numpy as np
+import cv2
+import os
+import json
+
+st.set_page_config(page_title="Scanner Segnavia", layout="centered")
+st.title("📸 Scanner Segnavia - Modalità Live")
+st.write("Inquadra il segnavia e avvia la scansione per trovare il sentiero.")
+
+uploaded_file = st.file_uploader("Scatta o carica l'immagine del segnavia", type=["jpg", "png", "jpeg"])
+
+@st.cache_data
+def carica_database():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.join(base_dir, 'sentieri.geojson')
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
         return None
 
-    simbolo_letto = simbolo_letto.lower().strip()
+dati_sentieri = carica_database()
+
+if uploaded_file is not None:
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Immagine acquisita", use_column_width=True)
     
-    # Dizionario dei sinonimi per mappare le forme in formato OSMC
-    mappa_forme = {
-        "triangolo": "triangle",
-        "cerchio": "round",
-        "rombo": "diamond",
-        "quadrato": "square",
-        "croce": "cross"
-    }
-    
-    # 1. Cerca una corrispondenza diretta o parziale
-    for feature in dati_json['features']:
-        properties = feature.get('properties', {})
-        osmc_symbol = str(properties.get('osmc:symbol', '')).lower()
-        nome = str(properties.get('name', '')).lower()
-        simbolo_it = str(properties.get('symbol:it', '')).lower()
-        ref = str(properties.get('ref', '')).lower()
-        
-        # 2. Controllo flessibile: verifica se c'è una parola chiave simile all'interno della stringa
-        match_trovato = False
-        
-        # Controllo con le parole chiave della forma
-        for chiave, valore in mappa_forme.items():
-            if chiave in simbolo_letto and (valore in osmc_symbol or valore in simbolo_it):
-                match_trovato = True
-                break
+    if st.button("Avvia scansione"):
+        if dati_sentieri is None:
+            st.error("Database non caricato. Controlla il file sentieri.geojson")
+        else:
+            # Converte l'immagine per l'elaborazione locale
+            img_cv = np.array(image)
+            img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
+            
+            # Analisi del colore dominante (es. rosso e bianco)
+            hsv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
+            
+            # Maschera per il rosso
+            lower_red1 = np.array([0, 100, 100])
+            upper_red1 = np.array([10, 255, 255])
+            lower_red2 = np.array([160, 100, 100])
+            upper_red2 = np.array([180, 255, 255])
+            
+            mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+            mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+            red_mask = mask1 + mask2
+            
+            # Verifica la percentuale di colore rosso per capire se il segnavia è presente
+            red_pixels = np.sum(red_mask > 0)
+            total_pixels = img_cv.shape[0] * img_cv.shape[1]
+            red_percentage = red_pixels / total_pixels
+            
+            # Simula il riconoscimento visivo
+            if red_percentage > 0.05: # Soglia minima di rosso trovata
+                st.info("Riconosciuto segnavia con dominanza rossa. Ricerca nel database in corso...")
+                trovati = []
                 
-        # Controllo testuale di base (es. se l'utente scrive 'triangolo rosso')
-        if (simbolo_letto in osmc_symbol or 
-            simbolo_letto in nome or 
-            simbolo_letto in ref or 
-            simbolo_letto in simbolo_it or 
-            match_trovato):
-            
-            return {
-                "nome": properties.get('name', 'Sentiero senza nome'),
-                "ref": properties.get('ref', 'N/D'),
-                "simbolo": properties.get('osmc:symbol', 'N/D'),
-                "simbolo_it": properties.get('symbol:it', 'N/D')
-            }
-            
-    return None
+                for feature in dati_sentieri['features']:
+                    properties = feature.get('properties', {})
+                    osmc = str(properties.get('osmc:symbol', '')).lower()
+                    
+                    if "red" in osmc:
+                        trovati.append(properties)
+                        
+                if trovati:
+                    st.success(f"Trovato {len(trovati)} sentiero compatibile:")
+                    for t in trovati[:3]:
+                        st.write(f"**Nome:** {t.get('name')}")
+                        st.write(f"**Codice:** {t.get('ref')}")
+                        st.write(f"**OSMC:** {t.get('osmc:symbol')}")
+                        st.write("---")
+                else:
+                    st.warning("Nessun sentiero associato al rosso trovato nel database.")
+            else:
+                st.warning("Impossibile rilevare un segnale escursionistico chiaro nell'immagine.")
