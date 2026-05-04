@@ -24,7 +24,7 @@ if uploaded_file is not None:
         with st.spinner("Analisi del segnavia in corso..."):
             try:
                 # Modello aggiornato e compatibile
-                model = genai.GenerativeModel(model_name='gemini-1.5-flash')
+                model = genai.GenerativeModel(model_name='gemini-2.5-flash')
                 
                 # Invio dell'immagine
                 response = model.generate_content([
