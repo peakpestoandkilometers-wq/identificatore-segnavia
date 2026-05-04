@@ -1,15 +1,12 @@
 import streamlit as st
-from PIL import Image
-import numpy as np
-import cv2
 import os
 import json
 
 st.set_page_config(page_title="Scanner Segnavia", layout="centered")
-st.title("📸 Scanner Segnavia - Modalità Live")
-st.write("Inquadra il segnavia e avvia la scansione per trovare il sentiero.")
+st.title("📸 Scanner Segnavia - Modalità Semplificata")
+st.write("Carica l'immagine o inserisci il segnavia per trovare il sentiero associato.")
 
-uploaded_file = st.file_uploader("Scatta o carica l'immagine del segnavia", type=["jpg", "png", "jpeg"])
+uploaded_file = st.file_uploader("Carica immagine", type=["jpg", "png", "jpeg"])
 
 @st.cache_data
 def carica_database():
@@ -23,56 +20,34 @@ def carica_database():
 
 dati_sentieri = carica_database()
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Immagine acquisita", use_column_width=True)
-    
-    if st.button("Avvia scansione"):
-        if dati_sentieri is None:
-            st.error("Database non caricato. Controlla il file sentieri.geojson")
-        else:
-            # Converte l'immagine per l'elaborazione locale
-            img_cv = np.array(image)
-            img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
+testo_manuale = st.text_input("Inserisci il codice del segnavia (es. red:white:red o 'a rossa'):")
+
+if st.button("Cerca nel database") or testo_manuale:
+    if dati_sentieri is None:
+        st.error("File sentieri.geojson non trovato nel repository.")
+    else:
+        chiave_ricerca = (testo_manuale).lower().strip()
+        trovati = []
+        
+        for feature in dati_sentieri['features']:
+            properties = feature.get('properties', {})
+            osmc_symbol = str(properties.get('osmc:symbol', '')).lower()
+            nome = str(properties.get('name', '')).lower()
+            simbolo_it = str(properties.get('symbol:it', '')).lower()
+            ref = str(properties.get('ref', '')).lower()
             
-            # Analisi del colore dominante (es. rosso e bianco)
-            hsv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
-            
-            # Maschera per il rosso
-            lower_red1 = np.array([0, 100, 100])
-            upper_red1 = np.array([10, 255, 255])
-            lower_red2 = np.array([160, 100, 100])
-            upper_red2 = np.array([180, 255, 255])
-            
-            mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
-            mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
-            red_mask = mask1 + mask2
-            
-            # Verifica la percentuale di colore rosso per capire se il segnavia è presente
-            red_pixels = np.sum(red_mask > 0)
-            total_pixels = img_cv.shape[0] * img_cv.shape[1]
-            red_percentage = red_pixels / total_pixels
-            
-            # Simula il riconoscimento visivo
-            if red_percentage > 0.05: # Soglia minima di rosso trovata
-                st.info("Riconosciuto segnavia con dominanza rossa. Ricerca nel database in corso...")
-                trovati = []
+            if (chiave_ricerca in osmc_symbol or 
+                chiave_ricerca in nome or 
+                chiave_ricerca in simbolo_it or 
+                chiave_ricerca in ref):
+                trovati.append(properties)
                 
-                for feature in dati_sentieri['features']:
-                    properties = feature.get('properties', {})
-                    osmc = str(properties.get('osmc:symbol', '')).lower()
-                    
-                    if "red" in osmc:
-                        trovati.append(properties)
-                        
-                if trovati:
-                    st.success(f"Trovato {len(trovati)} sentiero compatibile:")
-                    for t in trovati[:3]:
-                        st.write(f"**Nome:** {t.get('name')}")
-                        st.write(f"**Codice:** {t.get('ref')}")
-                        st.write(f"**OSMC:** {t.get('osmc:symbol')}")
-                        st.write("---")
-                else:
-                    st.warning("Nessun sentiero associato al rosso trovato nel database.")
-            else:
-                st.warning("Impossibile rilevare un segnale escursionistico chiaro nell'immagine.")
+        if trovati:
+            st.success(f"Trovati {len(trovati)} sentieri compatibili:")
+            for t in trovati[:3]:
+                st.write(f"**Nome:** {t.get('name')}")
+                st.write(f"**Codice:** {t.get('ref')}")
+                st.write(f"**OSMC:** {t.get('osmc:symbol')}")
+                st.write("---")
+        else:
+            st.warning("Nessun sentiero trovato con i parametri inseriti.")
