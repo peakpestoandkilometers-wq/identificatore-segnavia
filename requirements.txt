@@ -1,3 +1,6 @@
-google-generativeai
-pillow
 streamlit
+Pillow
+numpy
+opencv-python-headless
+google-generativeai
+requests
