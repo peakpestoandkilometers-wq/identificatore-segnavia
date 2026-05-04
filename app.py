@@ -3,7 +3,6 @@ import google.generativeai as genai
 from PIL import Image
 import os
 import json
-import time
 
 # Configurazione delle API di Google
 if "GEMINI_API_KEY" in st.secrets:
@@ -19,7 +18,7 @@ st.write("Carica l'immagine del segnavia e l'app la confronterà con il database
 uploaded_file = st.file_uploader("Scegli un'immagine...", type=["jpg", "png", "jpeg"])
 posizione_utente = st.text_input("In che regione/zona ti trovi? (es. 'Liguria')", value="Liguria")
 
-# Funzione per caricare i dati dal file GeoJSON locale
+# Carica il database da file
 @st.cache_data
 def carica_database():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -29,70 +28,97 @@ def carica_database():
         with open(json_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        st.error(f"Il file non è stato trovato in: {json_path}. Assicurati di averlo caricato nel repository.")
+        st.error(f"Il file non è stato trovato in: {json_path}. Assicurati di averlo caricato.")
         return None
 
-# Carica i dati all'avvio
 dati_sentieri = carica_database()
 
+def normalizza_stringa(testo):
+    """Converte le descrizioni in linguaggio naturale nel formato logico OSMC."""
+    testo = str(testo).lower().strip()
+    
+    # Mappatura delle variabili più frequenti nei sentieri
+    sostituzioni = {
+        "cerchio": "round",
+        "cerchio bianco": "white_round",
+        "rombo": "diamond",
+        "quadrato": "square",
+        "croce": "cross",
+        "triangolo": "triangle",
+        "barra": "bar",
+        "linea": "bar",
+        "bianco e rosso": "red:white:red",
+        "a rossa": "a",
+        "rossa": "red",
+        "bianco": "white"
+    }
+    
+    for chiave, valore in sostituzioni.items():
+        if chiave in testo:
+            testo = testo.replace(chiave, valore)
+            
+    return testo
+
 def cerca_su_json_locale(simbolo_letto, localita, dati_json):
-    """Cerca la corrispondenza del segnavia all'interno del file GeoJSON locale."""
+    """Cerca la corrispondenza del segnavia analizzando tutte le features del file."""
     if not dati_json or 'features' not in dati_json:
         return None
 
-    simbolo_letto = simbolo_letto.lower()
-    
+    simbolo_normalizzato = normalizza_stringa(simbolo_letto)
+
     for feature in dati_json['features']:
         properties = feature.get('properties', {})
-        osmc_symbol = properties.get('osmc:symbol', '').lower()
-        nome = properties.get('name', '').lower()
         
-        if simbolo_letto in osmc_symbol or simbolo_letto in nome:
+        # Estrae tutte le variabili di interesse
+        osmc_symbol = str(properties.get('osmc:symbol', '')).lower()
+        nome = str(properties.get('name', '')).lower()
+        ref = str(properties.get('ref', '')).lower()
+        simbolo_it = str(properties.get('symbol:it', '')).lower()
+        
+        # Controlla se una delle variabili corrisponde all'input
+        if (simbolo_normalizzato in osmc_symbol or 
+            simbolo_normalizzato in nome or 
+            simbolo_normalizzato in ref or
+            simbolo_normalizzato in simbolo_it):
+            
             return {
                 "nome": properties.get('name', 'Sentiero senza nome'),
                 "ref": properties.get('ref', 'N/D'),
-                "simbolo": properties.get('osmc:symbol', 'N/D')
+                "simbolo": properties.get('osmc:symbol', 'N/D'),
+                "simbolo_it": properties.get('symbol:it', 'N/D')
             }
+            
     return None
 
 if uploaded_file is not None:
     image_file = Image.open(uploaded_file)
     st.image(image_file, caption="Segnavia caricato", use_column_width=True)
     
-    # Alternativa manuale se non vuoi consumare le chiamate all'AI
-    st.write("---")
-    simbolo_manuale = st.text_input("Se hai raggiunto il limite giornaliero dell'AI, inserisci il simbolo manualmente (es. red:white:red):")
+    simbolo_manuale = st.text_input("Se hai raggiunto il limite dell'AI, inserisci il segnavia manualmente (es. red:white:red o 'a rossa su cerchio bianco'):")
     
     if st.button("Analizza e confronta") or simbolo_manuale:
-        simbolo_letto = ""
+        simbolo_letto = simbolo_manuale
         
-        if simbolo_manuale:
-            simbolo_letto = simbolo_manuale
-        else:
+        if not simbolo_manuale:
             with st.spinner("Analisi in corso..."):
                 try:
-                    # Chiamata all'AI
                     model = genai.GenerativeModel(model_name='gemini-2.5-flash')
                     response = model.generate_content([
-                        f"""
-                        Sei un esperto di escursionismo CAI.
-                        Osserva il segnavia nell'immagine e indica il simbolo o i colori (es. red:white:red).
-                        Restituisci solo la parola chiave del simbolo trovata.
-                        """,
+                        "Osserva l'immagine del segnavia e restituisci la descrizione sintetica del simbolo (es. A rossa, cerchio bianco, rombo rosso).",
                         image_file
                     ])
                     simbolo_letto = response.text.strip()
-                except Exception as e:
-                    st.error("Limite giornaliero raggiunto o errore di connessione. Inserisci il segnavia manualmente qui sopra.")
-                    st.info("Puoi inserire manualmente il testo del segnavia per continuare il test.")
-        
+                except:
+                    st.error("Errore con l'AI, inserisci il dato manualmente.")
+                    
         if simbolo_letto:
-            st.info(f"Simbolo identificato: **{simbolo_letto}**")
+            st.info(f"Simbolo identificato (Originale): **{simbolo_letto}**")
             risultato = cerca_su_json_locale(simbolo_letto, posizione_utente, dati_sentieri)
             
             if risultato:
                 st.success(f"✅ Trovato sul database locale: **{risultato['nome']}**")
-                st.write(f"**Codice OSMC (Segnavia):** {risultato['simbolo']}")
+                st.write(f"**Codice OSMC:** {risultato['simbolo']}")
                 st.write(f"**Codice Sentiero:** {risultato['ref']}")
+                st.write(f"**Descrizione in IT:** {risultato['simbolo_it']}")
             else:
-                st.warning("Nessuna corrispondenza esatta trovata negli itinerari archiviati nel file GeoJSON.")
+                st.warning("Nessuna corrispondenza trovata con questo segnavia nel file GeoJSON.")
