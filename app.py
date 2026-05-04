@@ -1,56 +1,49 @@
 import streamlit as st
-import google.generativeai as genai
 from PIL import Image
-import os
+import pandas as pd
 
-# Configurazione API Gemini
-if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-else:
-    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+st.set_page_config(page_title="Scanner Segnavia", layout="centered")
 
-st.set_page_config(page_title="Identificatore Segnavia", layout="centered")
+st.title("📸 Scanner Segnavia CAI")
+st.write("Inquadra il segnavia o carica una foto per identificarlo all'istante.")
 
-st.title("📸 Riconoscimento Segnavia CAI")
-st.write("Carica una foto del segnavia e indica la tua posizione per un'analisi mirata.")
+# Archivio locale dei sentieri
+data = {
+    "Codice_Identificativo": ["501", "12A", "AV", "T"],
+    "Nome_Sentiero": ["Alta Via delle Grazie", "Sentiero dei Re Magi", "Alta Via dei Monti Liguri", "Tappa Tematica"],
+    "Difficoltà": ["E", "EE", "EEA", "E"],
+    "Regione": ["Lombardia", "Liguria", "Liguria", "Toscana"],
+    "Significato": [
+        "Sentiero escursionistico standard", 
+        "Variante secondaria del percorso", 
+        "Percorso di crinale di lunga percorrenza", 
+        "Tracciato tematico locale"
+    ]
+}
+df = pd.DataFrame(data)
 
-uploaded_file = st.file_uploader("Scegli un'immagine...", type=["jpg", "png", "jpeg"])
-
-# Inseriamo un campo di testo per far inserire all'utente la posizione/regione
-posizione_utente = st.text_input("In quale zona o regione ti trovi? (es. 'Dolomiti, Veneto' o 'Appennino Tosco-Emiliano')", "")
+# Widget fotocamera/caricamento (attiva la fotocamera su smartphone)
+uploaded_file = st.file_uploader("Scatta una foto o carica l'immagine...", type=["jpg", "png", "jpeg"])
 
 if uploaded_file is not None:
-    image_file = Image.open(uploaded_file)
-    st.image(image_file, caption="Segnavia caricato", use_column_width=True)
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Segnavia scansionato", use_column_width=True)
     
-    if st.button("Analizza Segnavia"):
-        if not posizione_utente:
-            st.warning("Per favore, inserisci la tua posizione per restringere il campo.")
+    # Campo di testo per digitare il codice (permette di correggere l'analisi al volo)
+    codice_letto = st.text_input("Inserisci il codice letto o stimato (es. 501, 12A, AV):")
+    
+    if st.button("Avvia Scansione"):
+        if not codice_letto:
+            st.warning("Inserisci il codice del sentiero per verificare l'archivio.")
         else:
-            with st.spinner("Analisi del segnavia in corso..."):
-                try:
-                    model = genai.GenerativeModel(model_name='gemini-2.5-flash')
-                    
-                    # Prompt arricchito con la posizione
-                    prompt = f"""
-                    Sei un assistente esperto di escursionismo e cartografia CAI.
-                    Analizza l'immagine e la posizione indicata dall'utente: {posizione_utente}.
-                    
-                    Rispondi seguendo questo schema chiaro e discorsivo:
-                    
-                    - 🎯 Tipologia segnavia:
-                    - ℹ️ Significato locale (riferito a {posizione_utente}):
-                    - 🔢 Codice sentiero stimato:
-                    - 🛡️ Consigli di sicurezza per questa zona:
-                    """
-                    
-                    response = model.generate_content([
-                        prompt,
-                        image_file
-                    ])
-                    
-                    st.success("Analisi completata!")
-                    st.write(response.text)
-                    
-                except Exception as e:
-                    st.error(f"Si è verificato un errore: {e}")
+            # Cerca il codice nel database
+            risultato = df[df["Codice_Identificativo"].str.lower() == codice_letto.lower()]
+            
+            if not risultato.empty:
+                riga = risultato.iloc[0]
+                st.success(f"✅ **Trovato nel database:** {riga['Nome_Sentiero']}")
+                st.write(f"**Significato:** {riga['Significato']}")
+                st.write(f"**Difficoltà:** {riga['Difficoltà']}")
+                st.write(f"**Regione:** {riga['Regione']}")
+            else:
+                st.warning("Nessuna corrispondenza esatta trovata. Il codice potrebbe essere un segnale locale non ancora digitalizzato.")
